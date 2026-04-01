@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, formatKES, getFullName, ListingRecord, ProfileSummary } from '@/lib/marketplace'
+import { ensureOwnProfile } from '@/lib/supabase/profile'
 
 type DashboardStats = {
   totalListings: number
@@ -52,6 +53,8 @@ export default function DashboardPage() {
   const [editMode, setEditMode] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [requiresAuth, setRequiresAuth] = useState(false)
 
   useEffect(() => {
     void hydrateDashboard()
@@ -59,99 +62,108 @@ export default function DashboardPage() {
 
   const hydrateDashboard = async () => {
     const supabase = createClient()
-    const {
-      data: { user: currentUser },
-    } = await supabase.auth.getUser()
+    setIsLoading(true)
+    setLoadError(null)
+    setRequiresAuth(false)
 
-    if (!currentUser) {
-      router.push('/auth/login')
-      return
-    }
+    try {
+      const {
+        data: { user: currentUser },
+        error: authError,
+      } = await supabase.auth.getUser()
 
-    setUser(currentUser)
+      if (authError) {
+        throw authError
+      }
 
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, first_name, last_name, phone_number, location, bio, user_type')
-      .eq('id', currentUser.id)
-      .single()
+      if (!currentUser) {
+        setRequiresAuth(true)
+        router.push('/auth/login?redirect=/dashboard')
+        return
+      }
 
-    if (profileError || !profileData) {
-      console.error('Error fetching profile:', profileError)
-      setIsLoading(false)
-      return
-    }
+      setUser(currentUser)
 
-    const hydratedProfile = profileData as ProfileSummary
-    setProfile(hydratedProfile)
-    setEditData(hydratedProfile)
+      const { profile: hydratedProfile, error: profileError } = await ensureOwnProfile(supabase, currentUser)
 
-    const isSellerLike = ['seller', 'dealer', 'admin'].includes(hydratedProfile.user_type)
+      if (profileError || !hydratedProfile) {
+        setLoadError(profileError ?? 'We could not load your marketplace profile.')
+        return
+      }
 
-    const { data: unreadMessages } = await supabase
-      .from('messages')
-      .select('id')
-      .eq('recipient_id', currentUser.id)
-      .eq('is_read', false)
+      setProfile(hydratedProfile)
+      setEditData(hydratedProfile)
 
-    const { data: reviewsData } = await supabase
-      .from('reviews')
-      .select('id')
-      .eq('reviewed_user_id', currentUser.id)
+      const isSellerLike = ['seller', 'dealer', 'admin'].includes(hydratedProfile.user_type)
 
-    if (!isSellerLike) {
-      const { data: buyerInquiries } = await supabase
-        .from('inquiries')
-        .select('id, listing_id, status, offered_price_ksh, message, created_at')
-        .eq('buyer_id', currentUser.id)
-        .order('created_at', { ascending: false })
-        .limit(5)
+      const { data: unreadMessages } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('recipient_id', currentUser.id)
+        .eq('is_read', false)
 
-      setRecentOffers((buyerInquiries ?? []) as InquirySummary[])
-      setStats({
-        totalListings: 0,
-        activeListings: 0,
-        unreadMessages: unreadMessages?.length ?? 0,
-        totalViews: 0,
-        openOffers: (buyerInquiries ?? []).filter((inquiry) => inquiry.status === 'pending').length,
-        reviewCount: reviewsData?.length ?? 0,
-      })
-      setIsLoading(false)
-      return
-    }
+      const { data: reviewsData } = await supabase
+        .from('reviews')
+        .select('id')
+        .eq('reviewed_user_id', currentUser.id)
 
-    const { data: listingData } = await supabase
-      .from('car_listings')
-      .select('*')
-      .eq('seller_id', currentUser.id)
-      .order('created_at', { ascending: false })
+      if (!isSellerLike) {
+        const { data: buyerInquiries } = await supabase
+          .from('inquiries')
+          .select('id, listing_id, status, offered_price_ksh, message, created_at')
+          .eq('buyer_id', currentUser.id)
+          .order('created_at', { ascending: false })
+          .limit(5)
 
-    const sellerListings = (listingData ?? []) as ListingRecord[]
-    setListings(sellerListings)
+        setRecentOffers((buyerInquiries ?? []) as InquirySummary[])
+        setStats({
+          totalListings: 0,
+          activeListings: 0,
+          unreadMessages: unreadMessages?.length ?? 0,
+          totalViews: 0,
+          openOffers: (buyerInquiries ?? []).filter((inquiry) => inquiry.status === 'pending').length,
+          reviewCount: reviewsData?.length ?? 0,
+        })
+        return
+      }
 
-    const listingIds = sellerListings.map((listing) => listing.id)
-    const [{ data: analyticsData }, { data: inquiriesData }] = await Promise.all([
-      listingIds.length
-        ? supabase.from('analytics').select('event_type, listing_id').in('listing_id', listingIds)
-        : Promise.resolve({ data: [] }),
-      supabase
-        .from('inquiries')
-        .select('id, listing_id, status, offered_price_ksh, message, created_at')
+      const { data: listingData } = await supabase
+        .from('car_listings')
+        .select('*')
         .eq('seller_id', currentUser.id)
         .order('created_at', { ascending: false })
-        .limit(5),
-    ])
 
-    setRecentOffers((inquiriesData ?? []) as InquirySummary[])
-    setStats({
-      totalListings: sellerListings.length,
-      activeListings: sellerListings.filter((listing) => listing.status === 'active').length,
-      unreadMessages: unreadMessages?.length ?? 0,
-      totalViews: (analyticsData ?? []).filter((event) => event.event_type === 'view').length,
-      openOffers: (inquiriesData ?? []).filter((inquiry) => inquiry.status === 'pending').length,
-      reviewCount: reviewsData?.length ?? 0,
-    })
-    setIsLoading(false)
+      const sellerListings = (listingData ?? []) as ListingRecord[]
+      setListings(sellerListings)
+
+      const listingIds = sellerListings.map((listing) => listing.id)
+      const [{ data: analyticsData }, { data: inquiriesData }] = await Promise.all([
+        listingIds.length
+          ? supabase.from('analytics').select('event_type, listing_id').in('listing_id', listingIds)
+          : Promise.resolve({ data: [] }),
+        supabase
+          .from('inquiries')
+          .select('id, listing_id, status, offered_price_ksh, message, created_at')
+          .eq('seller_id', currentUser.id)
+          .order('created_at', { ascending: false })
+          .limit(5),
+      ])
+
+      setRecentOffers((inquiriesData ?? []) as InquirySummary[])
+      setStats({
+        totalListings: sellerListings.length,
+        activeListings: sellerListings.filter((listing) => listing.status === 'active').length,
+        unreadMessages: unreadMessages?.length ?? 0,
+        totalViews: (analyticsData ?? []).filter((event) => event.event_type === 'view').length,
+        openOffers: (inquiriesData ?? []).filter((inquiry) => inquiry.status === 'pending').length,
+        reviewCount: reviewsData?.length ?? 0,
+      })
+    } catch (hydrateError) {
+      console.error('Failed to hydrate dashboard:', hydrateError)
+      setLoadError(hydrateError instanceof Error ? hydrateError.message : 'Failed to load the dashboard.')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleProfileUpdate = async () => {
@@ -197,6 +209,61 @@ export default function DashboardPage() {
         <main className="min-h-screen py-8">
           <div className="container mx-auto px-4">
             <div className="h-[560px] animate-pulse rounded-[1.75rem] bg-muted" />
+          </div>
+        </main>
+      </>
+    )
+  }
+
+  if (requiresAuth) {
+    return (
+      <>
+        <Header />
+        <main className="min-h-screen py-8">
+          <div className="container mx-auto max-w-3xl px-4">
+            <Card className="rounded-[1.75rem] border-border/70 bg-card/90">
+              <CardHeader>
+                <CardTitle>Login required</CardTitle>
+                <CardDescription>You need to sign in before AutoCore can load your dashboard.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-3">
+                <Button asChild>
+                  <Link href="/auth/login?redirect=/dashboard">Login</Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/browse">Browse Cars</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </main>
+      </>
+    )
+  }
+
+  if (loadError && !profile) {
+    return (
+      <>
+        <Header />
+        <main className="min-h-screen py-8">
+          <div className="container mx-auto max-w-3xl px-4">
+            <Card className="rounded-[1.75rem] border-border/70 bg-card/90">
+              <CardHeader>
+                <CardTitle>Dashboard could not load</CardTitle>
+                <CardDescription>
+                  The page hit an auth or profile-loading problem, so it now shows a recovery panel instead of a blank shell.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</p>
+                <div className="flex flex-wrap gap-3">
+                  <Button onClick={() => void hydrateDashboard()}>Try again</Button>
+                  <Button variant="outline" asChild>
+                    <Link href="/browse">Browse Cars</Link>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </main>
       </>

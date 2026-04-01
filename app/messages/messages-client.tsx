@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Header from '@/components/header'
 import { Badge } from '@/components/ui/badge'
@@ -36,6 +37,8 @@ export default function MessagesClientPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState('')
   const [isSending, setIsSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [requiresAuth, setRequiresAuth] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -60,17 +63,33 @@ export default function MessagesClientPage() {
 
   const hydratePage = async () => {
     const supabase = createClient()
-    const {
-      data: { user: currentUser },
-    } = await supabase.auth.getUser()
+    setIsLoading(true)
+    setError(null)
+    setRequiresAuth(false)
 
-    if (!currentUser) {
-      router.push('/auth/login')
-      return
+    try {
+      const {
+        data: { user: currentUser },
+        error: authError,
+      } = await supabase.auth.getUser()
+
+      if (authError) {
+        throw authError
+      }
+
+      if (!currentUser) {
+        setRequiresAuth(true)
+        router.push('/auth/login?redirect=/messages')
+        return
+      }
+
+      setUser(currentUser)
+    } catch (hydrateError) {
+      console.error('Failed to hydrate messages page:', hydrateError)
+      setError(hydrateError instanceof Error ? hydrateError.message : 'Failed to load your inbox.')
+    } finally {
+      setIsLoading(false)
     }
-
-    setUser(currentUser)
-    setIsLoading(false)
   }
 
   const fetchConversations = async () => {
@@ -79,6 +98,7 @@ export default function MessagesClientPage() {
     }
 
     const supabase = createClient()
+    setError(null)
     const { data, error } = await supabase
       .from('messages')
       .select('id, sender_id, recipient_id, body, created_at, is_read')
@@ -87,6 +107,7 @@ export default function MessagesClientPage() {
 
     if (error) {
       console.error('Error fetching conversations:', error)
+      setError(error.message)
       return
     }
 
@@ -154,6 +175,7 @@ export default function MessagesClientPage() {
     }
 
     const supabase = createClient()
+    setError(null)
     const { data, error } = await supabase
       .from('messages')
       .select('id, sender_id, recipient_id, body, created_at, is_read')
@@ -164,6 +186,7 @@ export default function MessagesClientPage() {
 
     if (error) {
       console.error('Error fetching messages:', error)
+      setError(error.message)
       return
     }
 
@@ -204,9 +227,11 @@ export default function MessagesClientPage() {
 
     if (error) {
       console.error('Error sending message:', error)
+      setError(error.message)
     } else if (data) {
       setMessages((current) => [...current, data as Message])
       setNewMessage('')
+      setError(null)
       void fetchConversations()
     }
 
@@ -228,6 +253,54 @@ export default function MessagesClientPage() {
     )
   }
 
+  if (requiresAuth) {
+    return (
+      <>
+        <Header />
+        <main className="min-h-screen py-8">
+          <div className="container mx-auto max-w-3xl px-4">
+            <div className="rounded-[1.75rem] border border-border/70 bg-card/90 p-8">
+              <h1 className="text-3xl font-semibold">Login required</h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Sign in to view buyer and seller conversations.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Button asChild>
+                  <Link href="/auth/login?redirect=/messages">Login</Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/browse">Browse Cars</Link>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </main>
+      </>
+    )
+  }
+
+  if (error && !user) {
+    return (
+      <>
+        <Header />
+        <main className="min-h-screen py-8">
+          <div className="container mx-auto max-w-3xl px-4">
+            <div className="rounded-[1.75rem] border border-border/70 bg-card/90 p-8">
+              <h1 className="text-3xl font-semibold">Inbox could not load</h1>
+              <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Button onClick={() => void hydratePage()}>Try again</Button>
+                <Button variant="outline" asChild>
+                  <Link href="/browse">Browse Cars</Link>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </main>
+      </>
+    )
+  }
+
   return (
     <>
       <Header />
@@ -237,6 +310,8 @@ export default function MessagesClientPage() {
             <p className="text-sm font-medium uppercase tracking-[0.24em] text-primary">Inbox</p>
             <h1 className="mt-2 text-4xl font-semibold">Messages and negotiations</h1>
           </div>
+
+          {error ? <p className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
           <div className="grid h-[680px] gap-6 md:grid-cols-[320px_1fr]">
             <div className="overflow-hidden rounded-[1.75rem] border border-border/70 bg-card/90">

@@ -49,6 +49,7 @@ export default function ProfilePage() {
   const [isSubmittingReview, setIsSubmittingReview] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     void hydrateProfile()
@@ -57,62 +58,73 @@ export default function ProfilePage() {
   const hydrateProfile = async () => {
     const supabase = createClient()
     setIsLoading(true)
+    setLoadError(null)
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    setCurrentUser(user)
+    try {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        setCurrentUser(user)
+      } catch (authError) {
+        console.error('Failed to resolve viewer session on profile page:', authError)
+        setCurrentUser(null)
+      }
 
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, first_name, last_name, phone_number, location, bio, user_type')
-      .eq('id', userId)
-      .single()
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, phone_number, location, bio, user_type')
+        .eq('id', userId)
+        .single()
 
-    if (profileError || !profileData) {
-      console.error('Error fetching profile:', profileError)
-      setProfile(null)
+      if (profileError || !profileData) {
+        console.error('Error fetching profile:', profileError)
+        setProfile(null)
+        return
+      }
+
+      setProfile(profileData as ProfileSummary)
+
+      const [{ data: reviewData }, { data: listingData }] = await Promise.all([
+        supabase
+          .from('reviews')
+          .select('id, rating, title, comment, reviewer_id, created_at, transaction_type')
+          .eq('reviewed_user_id', userId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('car_listings')
+          .select('*')
+          .eq('seller_id', userId)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(6),
+      ])
+
+      const reviewerIds = Array.from(new Set(((reviewData ?? []) as Review[]).map((review) => review.reviewer_id)))
+      const { data: reviewerProfiles } = reviewerIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, first_name, last_name, phone_number, location, bio, user_type')
+            .in('id', reviewerIds)
+        : { data: [] }
+
+      const reviewersById = new Map(
+        ((reviewerProfiles ?? []) as ProfileSummary[]).map((reviewer) => [reviewer.id, reviewer]),
+      )
+
+      setReviews(
+        ((reviewData ?? []) as Review[]).map((review) => ({
+          ...review,
+          reviewer: reviewersById.get(review.reviewer_id) ?? null,
+        })),
+      )
+      setActiveListings((listingData ?? []) as ListingRecord[])
+    } catch (hydrateError) {
+      console.error('Failed to load profile page:', hydrateError)
+      setLoadError(hydrateError instanceof Error ? hydrateError.message : 'Failed to load this profile.')
+    } finally {
       setIsLoading(false)
-      return
     }
-
-    setProfile(profileData as ProfileSummary)
-
-    const [{ data: reviewData }, { data: listingData }] = await Promise.all([
-      supabase
-        .from('reviews')
-        .select('id, rating, title, comment, reviewer_id, created_at, transaction_type')
-        .eq('reviewed_user_id', userId)
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('car_listings')
-        .select('*')
-        .eq('seller_id', userId)
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(6),
-    ])
-
-    const reviewerIds = Array.from(new Set(((reviewData ?? []) as Review[]).map((review) => review.reviewer_id)))
-    const { data: reviewerProfiles } = reviewerIds.length
-      ? await supabase
-          .from('profiles')
-          .select('id, first_name, last_name, phone_number, location, bio, user_type')
-          .in('id', reviewerIds)
-      : { data: [] }
-
-    const reviewersById = new Map(
-      ((reviewerProfiles ?? []) as ProfileSummary[]).map((reviewer) => [reviewer.id, reviewer]),
-    )
-
-    setReviews(
-      ((reviewData ?? []) as Review[]).map((review) => ({
-        ...review,
-        reviewer: reviewersById.get(review.reviewer_id) ?? null,
-      })),
-    )
-    setActiveListings((listingData ?? []) as ListingRecord[])
-    setIsLoading(false)
   }
 
   const handleReviewSubmit = async (event: React.FormEvent) => {
@@ -172,6 +184,30 @@ export default function ProfilePage() {
   }
 
   if (!profile) {
+    if (loadError) {
+      return (
+        <>
+          <Header />
+          <main className="min-h-screen py-8">
+            <div className="container mx-auto px-4">
+              <Card className="rounded-[1.75rem] border-border/70 bg-card/90">
+                <CardContent className="space-y-4 p-8">
+                  <h1 className="text-3xl font-semibold">Profile could not load</h1>
+                  <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</p>
+                  <div className="flex flex-wrap gap-3">
+                    <Button onClick={() => void hydrateProfile()}>Try again</Button>
+                    <Button variant="outline" asChild>
+                      <Link href="/browse">Back to Browse</Link>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </main>
+        </>
+      )
+    }
+
     return (
       <>
         <Header />

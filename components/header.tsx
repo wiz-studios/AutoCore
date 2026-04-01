@@ -13,26 +13,43 @@ export default function Header() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const supabase = createClient()
+    let subscription: { unsubscribe: () => void } | null = null
 
-    const checkAuth = async () => {
-      const {
-        data: { user: currentUser },
-      } = await supabase.auth.getUser()
-      setUser(currentUser)
+    let supabase
+    try {
+      supabase = createClient()
+    } catch (error) {
+      console.error('Failed to create Supabase client in header:', error)
+      setUser(null)
       setIsLoading(false)
+      return
     }
 
-    checkAuth()
+    const checkAuth = async () => {
+      try {
+        const {
+          data: { user: currentUser },
+        } = await supabase.auth.getUser()
+        setUser(currentUser)
+      } catch (error) {
+        console.error('Failed to resolve auth state in header:', error)
+        setUser(null)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    void checkAuth()
 
     const {
-      data: { subscription },
+      data: { subscription: authSubscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
       setIsLoading(false)
     })
+    subscription = authSubscription
 
-    return () => subscription.unsubscribe()
+    return () => subscription?.unsubscribe()
   }, [])
 
   const handleLogout = async () => {

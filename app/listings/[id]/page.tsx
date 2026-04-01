@@ -30,6 +30,7 @@ export default function ListingDetailPage() {
   const [reportDescription, setReportDescription] = useState('')
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [isMessaging, setIsMessaging] = useState(false)
   const [isSubmittingOffer, setIsSubmittingOffer] = useState(false)
   const [isReporting, setIsReporting] = useState(false)
@@ -52,44 +53,55 @@ export default function ListingDetailPage() {
     setIsLoading(true)
     setFeedback(null)
     setError(null)
+    setLoadError(null)
 
-    const {
-      data: { user: currentUser },
-    } = await supabase.auth.getUser()
-    setUser(currentUser)
+    try {
+      try {
+        const {
+          data: { user: currentUser },
+        } = await supabase.auth.getUser()
+        setUser(currentUser)
+      } catch (authError) {
+        console.error('Failed to resolve viewer session on listing page:', authError)
+        setUser(null)
+      }
 
-    const { data: listingData, error: listingError } = await supabase
-      .from('car_listings')
-      .select('*')
-      .eq('id', listingId)
-      .single()
+      const { data: listingData, error: listingError } = await supabase
+        .from('car_listings')
+        .select('*')
+        .eq('id', listingId)
+        .single()
 
-    if (listingError || !listingData) {
-      console.error('Error fetching listing:', listingError)
-      setListing(null)
+      if (listingError || !listingData) {
+        console.error('Error fetching listing:', listingError)
+        setListing(null)
+        return
+      }
+
+      const [sellerResponse, imageResponse] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id, first_name, last_name, phone_number, location, bio, user_type')
+          .eq('id', listingData.seller_id)
+          .single(),
+        supabase
+          .from('car_images')
+          .select('id, listing_id, image_url, display_order')
+          .eq('listing_id', listingData.id)
+          .order('display_order', { ascending: true }),
+      ])
+
+      const fetchedImages = (imageResponse.data ?? []) as ListingImage[]
+      setListing(listingData as ListingRecord)
+      setSeller((sellerResponse.data as ProfileSummary | null) ?? null)
+      setImages(fetchedImages)
+      setActiveImage(fetchedImages[0]?.image_url ?? null)
+    } catch (hydrateError) {
+      console.error('Failed to load listing detail page:', hydrateError)
+      setLoadError(hydrateError instanceof Error ? hydrateError.message : 'Failed to load this listing.')
+    } finally {
       setIsLoading(false)
-      return
     }
-
-    const [sellerResponse, imageResponse] = await Promise.all([
-      supabase
-        .from('profiles')
-        .select('id, first_name, last_name, phone_number, location, bio, user_type')
-        .eq('id', listingData.seller_id)
-        .single(),
-      supabase
-        .from('car_images')
-        .select('id, listing_id, image_url, display_order')
-        .eq('listing_id', listingData.id)
-        .order('display_order', { ascending: true }),
-    ])
-
-    const fetchedImages = (imageResponse.data ?? []) as ListingImage[]
-    setListing(listingData as ListingRecord)
-    setSeller((sellerResponse.data as ProfileSummary | null) ?? null)
-    setImages(fetchedImages)
-    setActiveImage(fetchedImages[0]?.image_url ?? null)
-    setIsLoading(false)
   }
 
   const trackListingView = async () => {
@@ -253,6 +265,30 @@ export default function ListingDetailPage() {
   }
 
   if (!listing) {
+    if (loadError) {
+      return (
+        <>
+          <Header />
+          <main className="min-h-screen py-8">
+            <div className="container mx-auto px-4">
+              <Card className="rounded-[1.75rem] border-border/70 bg-card/90">
+                <CardContent className="space-y-4 p-8">
+                  <h1 className="text-3xl font-semibold">Listing could not load</h1>
+                  <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</p>
+                  <div className="flex flex-wrap gap-3">
+                    <Button onClick={() => void hydratePage()}>Try again</Button>
+                    <Button variant="outline" asChild>
+                      <Link href="/browse">Back to Browse</Link>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </main>
+        </>
+      )
+    }
+
     return (
       <>
         <Header />

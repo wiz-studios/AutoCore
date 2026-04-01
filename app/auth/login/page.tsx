@@ -1,8 +1,8 @@
 'use client'
 
+import { Suspense, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,11 +16,20 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 export default function Page() {
+  return (
+    <Suspense fallback={<LoginPageFallback />}>
+      <LoginPageContent />
+    </Suspense>
+  )
+}
+
+function LoginPageContent() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -38,7 +47,8 @@ export default function Page() {
         throw signInError
       }
 
-      router.push('/protected')
+      const redirectTarget = searchParams.get('redirect') || '/protected'
+      router.push(redirectTarget)
     } catch (loginError: unknown) {
       setError(loginError instanceof Error ? loginError.message : 'An error occurred')
     } finally {
@@ -95,6 +105,14 @@ export default function Page() {
           </Card>
         </div>
       </div>
+    </div>
+  )
+}
+
+function LoginPageFallback() {
+  return (
+    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
+      <div className="h-[340px] w-full max-w-sm animate-pulse rounded-[1.75rem] bg-muted" />
     </div>
   )
 }

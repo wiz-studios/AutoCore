@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowRight, ShieldCheck, Upload } from 'lucide-react'
 import Header from '@/components/header'
@@ -18,6 +19,7 @@ import {
   sourceOptions,
   transmissionOptions,
 } from '@/lib/marketplace'
+import { ensureOwnProfile } from '@/lib/supabase/profile'
 
 type ListingFormState = {
   title: string
@@ -64,6 +66,8 @@ export default function SellPage() {
   const [isUpgrading, setIsUpgrading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [requiresAuth, setRequiresAuth] = useState(false)
   const [formData, setFormData] = useState<ListingFormState>(initialFormState)
   const [imageUrls, setImageUrls] = useState(['', '', ''])
 
@@ -73,28 +77,46 @@ export default function SellPage() {
 
   const hydratePage = async () => {
     const supabase = createClient()
-    const {
-      data: { user: currentUser },
-    } = await supabase.auth.getUser()
+    setIsLoading(true)
+    setLoadError(null)
+    setRequiresAuth(false)
 
-    if (!currentUser) {
-      router.push('/auth/login')
-      return
+    try {
+      const {
+        data: { user: currentUser },
+        error: authError,
+      } = await supabase.auth.getUser()
+
+      if (authError) {
+        throw authError
+      }
+
+      if (!currentUser) {
+        setRequiresAuth(true)
+        router.push('/auth/login?redirect=/sell')
+        return
+      }
+
+      const { profile: profileData, error: profileError } = await ensureOwnProfile(supabase, currentUser)
+
+      setUser(currentUser)
+
+      if (profileError || !profileData) {
+        setLoadError(profileError ?? 'We could not load your seller profile right now.')
+        return
+      }
+
+      setProfile(profileData)
+      setFormData((current) => ({
+        ...current,
+        location: profileData.location ?? current.location,
+      }))
+    } catch (hydrateError) {
+      console.error('Failed to hydrate sell page:', hydrateError)
+      setLoadError(hydrateError instanceof Error ? hydrateError.message : 'Failed to load the sell page.')
+    } finally {
+      setIsLoading(false)
     }
-
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('id, first_name, last_name, phone_number, location, bio, user_type')
-      .eq('id', currentUser.id)
-      .single()
-
-    setUser(currentUser)
-    setProfile((profileData as ProfileSummary | null) ?? null)
-    setFormData((current) => ({
-      ...current,
-      location: (profileData?.location as string | null) ?? current.location,
-    }))
-    setIsLoading(false)
   }
 
   const handleInputChange = (field: keyof ListingFormState, value: string) => {
@@ -220,6 +242,61 @@ export default function SellPage() {
         <main className="min-h-screen py-8">
           <div className="container mx-auto px-4">
             <div className="h-48 animate-pulse rounded-[1.75rem] bg-muted" />
+          </div>
+        </main>
+      </>
+    )
+  }
+
+  if (requiresAuth) {
+    return (
+      <>
+        <Header />
+        <main className="min-h-screen py-8">
+          <div className="container mx-auto max-w-3xl px-4">
+            <Card className="rounded-[1.75rem] border-border/70 bg-card/90">
+              <CardHeader>
+                <CardTitle>Login required</CardTitle>
+                <CardDescription>You need an account before you can publish a vehicle listing.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-3">
+                <Button asChild>
+                  <Link href="/auth/login?redirect=/sell">Login</Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/auth/sign-up">Create account</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </main>
+      </>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <>
+        <Header />
+        <main className="min-h-screen py-8">
+          <div className="container mx-auto max-w-3xl px-4">
+            <Card className="rounded-[1.75rem] border-border/70 bg-card/90">
+              <CardHeader>
+                <CardTitle>Sell page could not load</CardTitle>
+                <CardDescription>
+                  We could not finish loading your marketplace workspace, so the page was left intentionally visible instead of blank.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</p>
+                <div className="flex flex-wrap gap-3">
+                  <Button onClick={() => void hydratePage()}>Try again</Button>
+                  <Button variant="outline" asChild>
+                    <Link href="/browse">Browse Cars</Link>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </main>
       </>

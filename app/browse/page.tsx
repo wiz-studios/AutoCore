@@ -40,6 +40,7 @@ export default function BrowsePage() {
   const [listings, setListings] = useState<BrowseListing[]>([])
   const [filteredListings, setFilteredListings] = useState<BrowseListing[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [filters, setFilters] = useState(defaultFilters)
 
   useEffect(() => {
@@ -77,64 +78,69 @@ export default function BrowsePage() {
   const fetchListings = async () => {
     const supabase = createClient()
     setIsLoading(true)
+    setError(null)
 
-    const { data, error } = await supabase
-      .from('car_listings')
-      .select('*')
-      .eq('status', 'active')
-      .order('featured', { ascending: false })
-      .order('created_at', { ascending: false })
+    try {
+      const { data, error: listingsError } = await supabase
+        .from('car_listings')
+        .select('*')
+        .eq('status', 'active')
+        .order('featured', { ascending: false })
+        .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('Error fetching listings:', error)
-      setListings([])
-      setIsLoading(false)
-      return
-    }
-
-    const listingRows = ((data ?? []) as ListingRecord[])
-    const sellerIds = Array.from(new Set(listingRows.map((listing) => listing.seller_id)))
-    const listingIds = listingRows.map((listing) => listing.id)
-
-    const [{ data: profileData }, { data: imageData }] = await Promise.all([
-      sellerIds.length
-        ? supabase
-            .from('profiles')
-            .select('id, first_name, last_name, phone_number, location, user_type, bio')
-            .in('id', sellerIds)
-        : Promise.resolve({ data: [] as ProfileSummary[] }),
-      listingIds.length
-        ? supabase
-            .from('car_images')
-            .select('id, listing_id, image_url, display_order')
-            .in('listing_id', listingIds)
-            .order('display_order', { ascending: true })
-        : Promise.resolve({ data: [] as ListingImage[] }),
-    ])
-
-    const profilesById = new Map(
-      ((profileData ?? []) as ProfileSummary[]).map((profile) => [profile.id, profile]),
-    )
-    const imagesByListing = new Map<string, ListingImage[]>()
-
-    for (const image of (imageData ?? []) as ListingImage[]) {
-      const existingImages = imagesByListing.get(image.listing_id) ?? []
-      existingImages.push(image)
-      imagesByListing.set(image.listing_id, existingImages)
-    }
-
-    const mergedListings = listingRows.map((listing) => {
-      const images = imagesByListing.get(listing.id) ?? []
-
-      return {
-        ...listing,
-        seller: profilesById.get(listing.seller_id) ?? null,
-        primaryImage: images[0]?.image_url ?? null,
+      if (listingsError) {
+        throw listingsError
       }
-    })
 
-    setListings(mergedListings)
-    setIsLoading(false)
+      const listingRows = (data ?? []) as ListingRecord[]
+      const sellerIds = Array.from(new Set(listingRows.map((listing) => listing.seller_id)))
+      const listingIds = listingRows.map((listing) => listing.id)
+
+      const [{ data: profileData }, { data: imageData }] = await Promise.all([
+        sellerIds.length
+          ? supabase
+              .from('profiles')
+              .select('id, first_name, last_name, phone_number, location, user_type, bio')
+              .in('id', sellerIds)
+          : Promise.resolve({ data: [] as ProfileSummary[] }),
+        listingIds.length
+          ? supabase
+              .from('car_images')
+              .select('id, listing_id, image_url, display_order')
+              .in('listing_id', listingIds)
+              .order('display_order', { ascending: true })
+          : Promise.resolve({ data: [] as ListingImage[] }),
+      ])
+
+      const profilesById = new Map(
+        ((profileData ?? []) as ProfileSummary[]).map((profile) => [profile.id, profile]),
+      )
+      const imagesByListing = new Map<string, ListingImage[]>()
+
+      for (const image of (imageData ?? []) as ListingImage[]) {
+        const existingImages = imagesByListing.get(image.listing_id) ?? []
+        existingImages.push(image)
+        imagesByListing.set(image.listing_id, existingImages)
+      }
+
+      const mergedListings = listingRows.map((listing) => {
+        const images = imagesByListing.get(listing.id) ?? []
+
+        return {
+          ...listing,
+          seller: profilesById.get(listing.seller_id) ?? null,
+          primaryImage: images[0]?.image_url ?? null,
+        }
+      })
+
+      setListings(mergedListings)
+    } catch (fetchError) {
+      console.error('Error fetching listings:', fetchError)
+      setListings([])
+      setError(fetchError instanceof Error ? fetchError.message : 'Failed to load marketplace inventory.')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const makes = Array.from(new Set(listings.map((listing) => listing.make))).sort()
@@ -170,6 +176,8 @@ export default function BrowsePage() {
               {filteredListings.length} listings
             </Badge>
           </div>
+
+          {error ? <p className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
           <Card className="mb-8 rounded-[1.75rem] border-border/70 bg-card/90 shadow-sm">
             <CardContent className="p-6">
