@@ -23,6 +23,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'listing_id and reason are required' }, { status: 400 })
     }
 
+    const { data: listing, error: listingError } = await supabase
+      .from('car_listings')
+      .select('id, seller_id')
+      .eq('id', listing_id)
+      .single()
+
+    if (listingError || !listing) {
+      return NextResponse.json({ error: 'Listing not found' }, { status: 404 })
+    }
+
+    if (listing.seller_id === user.id) {
+      return NextResponse.json({ error: 'You cannot report your own listing' }, { status: 400 })
+    }
+
+    const { data: existingReport } = await supabase
+      .from('flagged_listings')
+      .select('id')
+      .eq('listing_id', listing_id)
+      .eq('reported_by_id', user.id)
+      .eq('status', 'pending')
+      .maybeSingle()
+
+    if (existingReport) {
+      return NextResponse.json({ error: 'You already have a pending report for this listing' }, { status: 409 })
+    }
+
     const { data, error } = await supabase
       .from('flagged_listings')
       .insert([

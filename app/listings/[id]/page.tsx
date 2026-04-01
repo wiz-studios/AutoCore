@@ -105,7 +105,7 @@ export default function ListingDetailPage() {
   }
 
   const trackListingView = async () => {
-    if (!listing) {
+    if (!listing || user?.id === listing.seller_id) {
       return
     }
 
@@ -367,6 +367,13 @@ export default function ListingDetailPage() {
                       <p className="mt-2 text-sm text-muted-foreground">
                         {listing.year} {listing.make} {listing.model}
                       </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Badge variant="outline" className="capitalize">
+                          {listing.status}
+                        </Badge>
+                        {listing.condition_type ? <Badge variant="secondary">{listing.condition_type}</Badge> : null}
+                        {listing.source_type ? <Badge variant="secondary">{listing.source_type}</Badge> : null}
+                      </div>
                     </div>
                     <div className="space-y-2 text-sm text-muted-foreground">
                       <div className="flex items-center gap-2">

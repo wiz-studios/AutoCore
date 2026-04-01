@@ -59,6 +59,13 @@ export default function MessagesClientPage() {
   }, [selectedConversation, user])
 
   useEffect(() => {
+    const sellerParam = searchParams.get('seller')
+    if (sellerParam && sellerParam !== selectedConversation) {
+      setSelectedConversation(sellerParam)
+    }
+  }, [searchParams, selectedConversation])
+
+  useEffect(() => {
     if (!user?.id) {
       return
     }
@@ -456,7 +463,11 @@ export default function MessagesClientPage() {
                   </div>
 
                   <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-                    {messages.map((message) => (
+                    {messages.length === 0 ? (
+                      <div className="flex h-full items-center justify-center rounded-3xl border border-dashed border-border/70 bg-muted/20 px-6 text-center text-sm text-muted-foreground">
+                        No messages yet in this conversation. Send the first note to kick off the negotiation.
+                      </div>
+                    ) : messages.map((message) => (
                       <div
                         key={message.id}
                         className={`flex ${message.sender_id === user.id ? 'justify-end' : 'justify-start'}`}

@@ -3,6 +3,7 @@ export type ListingCondition = 'new' | 'used'
 export type ListingSource = 'local' | 'import'
 export type FuelType = 'petrol' | 'diesel' | 'hybrid' | 'electric'
 export type Transmission = 'manual' | 'automatic'
+export type InquiryStatus = 'pending' | 'accepted' | 'rejected' | 'sold'
 
 export type ProfileSummary = {
   id: string
@@ -41,6 +42,17 @@ export type ListingRecord = {
   clearing_agent_name: string | null
   status: 'active' | 'sold' | 'delisted'
   featured: boolean | null
+  created_at: string
+}
+
+export type InquiryRecord = {
+  id: string
+  buyer_id: string
+  seller_id: string
+  listing_id: string
+  offered_price_ksh: number | null
+  message: string | null
+  status: InquiryStatus
   created_at: string
 }
 
@@ -148,4 +160,32 @@ export function coerceImageUrls(urls: string[]) {
   return urls
     .map((value) => value.trim())
     .filter(Boolean)
+}
+
+export function getInquiryStatusLabel(status: InquiryStatus | string | null | undefined) {
+  switch (status) {
+    case 'accepted':
+      return 'Accepted'
+    case 'rejected':
+      return 'Rejected'
+    case 'sold':
+      return 'Sold'
+    case 'pending':
+    default:
+      return 'Pending'
+  }
+}
+
+export function getInquiryStatusVariant(status: InquiryStatus | string | null | undefined) {
+  switch (status) {
+    case 'accepted':
+      return 'default'
+    case 'rejected':
+      return 'destructive'
+    case 'sold':
+      return 'outline'
+    case 'pending':
+    default:
+      return 'secondary'
+  }
 }
