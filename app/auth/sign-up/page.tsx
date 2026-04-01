@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { PasswordInput } from '@/components/ui/password-input'
 
 export default function Page() {
   const [email, setEmail] = useState('')
@@ -41,27 +42,37 @@ export default function Page() {
     }
 
     try {
-      const { error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo:
-            process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
-            `${window.location.origin}/protected`,
-          data: {
-            first_name: firstName,
-            last_name: lastName,
-            phone_number: phoneNumber,
-            user_type: userType,
-          },
+      const signUpResponse = await fetch('/api/auth/sign-up', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          email,
+          password,
+          first_name: firstName,
+          last_name: lastName,
+          phone_number: phoneNumber,
+          user_type: userType,
+        }),
       })
 
-      if (signUpError) {
-        throw signUpError
+      const signUpPayload = (await signUpResponse.json()) as { error?: string }
+
+      if (!signUpResponse.ok) {
+        throw new Error(signUpPayload.error ?? 'Account creation failed.')
       }
 
-      router.push('/auth/sign-up-success')
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+
+      if (signInError) {
+        throw signInError
+      }
+
+      router.push('/protected')
     } catch (signupError: unknown) {
       setError(signupError instanceof Error ? signupError.message : 'An error occurred')
     } finally {
@@ -161,9 +172,8 @@ export default function Page() {
                   <div className="grid gap-2 sm:grid-cols-2">
                     <div className="grid gap-2">
                       <Label htmlFor="password">Password</Label>
-                      <Input
+                      <PasswordInput
                         id="password"
-                        type="password"
                         required
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -171,9 +181,8 @@ export default function Page() {
                     </div>
                     <div className="grid gap-2">
                       <Label htmlFor="repeat-password">Confirm Password</Label>
-                      <Input
+                      <PasswordInput
                         id="repeat-password"
-                        type="password"
                         required
                         value={repeatPassword}
                         onChange={(e) => setRepeatPassword(e.target.value)}
