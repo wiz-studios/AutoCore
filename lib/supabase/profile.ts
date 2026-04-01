@@ -23,7 +23,10 @@ function buildProfileSeed(user: User) {
   }
 }
 
-export async function ensureOwnProfile(supabase: SupabaseClient, user: User) {
+export async function ensureOwnProfile(
+  supabase: SupabaseClient<any, string, string, any, any>,
+  user: User,
+) {
   const { data: profileData, error: profileError } = await supabase
     .from('profiles')
     .select(PROFILE_SELECT_FIELDS)
