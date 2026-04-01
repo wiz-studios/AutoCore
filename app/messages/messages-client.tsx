@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { createClient } from '@/lib/supabase/client'
+import { SUPABASE_DB_SCHEMA } from '@/lib/supabase/schema'
 import { formatDate, getFullName, ProfileSummary } from '@/lib/marketplace'
 
 type Conversation = {
@@ -56,6 +57,105 @@ export default function MessagesClientPage() {
       void fetchMessages(selectedConversation)
     }
   }, [selectedConversation, user])
+
+  useEffect(() => {
+    if (!user?.id) {
+      return
+    }
+
+    const supabase = createClient()
+    let isDisposed = false
+    let refreshTimeout: ReturnType<typeof setTimeout> | null = null
+
+    const scheduleRefresh = (conversationId?: string | null) => {
+      if (isDisposed) {
+        return
+      }
+
+      if (refreshTimeout) {
+        clearTimeout(refreshTimeout)
+      }
+
+      refreshTimeout = setTimeout(() => {
+        void fetchConversations()
+
+        const targetConversationId = conversationId ?? selectedConversation
+        if (targetConversationId) {
+          void fetchMessages(targetConversationId)
+        }
+      }, 200)
+    }
+
+    const handleRealtimeChange = (payload: { new?: Message; old?: Message }) => {
+      const row = payload.new ?? payload.old
+      if (!row) {
+        return
+      }
+
+      const otherUserId = row.sender_id === user.id ? row.recipient_id : row.sender_id
+      scheduleRefresh(otherUserId)
+    }
+
+    const channel = supabase.channel(`messages:${user.id}`) as any
+
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: SUPABASE_DB_SCHEMA,
+          table: 'messages',
+          filter: `recipient_id=eq.${user.id}`,
+        },
+        handleRealtimeChange,
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: SUPABASE_DB_SCHEMA,
+          table: 'messages',
+          filter: `sender_id=eq.${user.id}`,
+        },
+        handleRealtimeChange,
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: SUPABASE_DB_SCHEMA,
+          table: 'messages',
+          filter: `recipient_id=eq.${user.id}`,
+        },
+        handleRealtimeChange,
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: SUPABASE_DB_SCHEMA,
+          table: 'messages',
+          filter: `sender_id=eq.${user.id}`,
+        },
+        handleRealtimeChange,
+      )
+      .subscribe()
+
+    const pollingInterval = window.setInterval(() => {
+      scheduleRefresh()
+    }, 15000)
+
+    return () => {
+      isDisposed = true
+
+      if (refreshTimeout) {
+        clearTimeout(refreshTimeout)
+      }
+
+      window.clearInterval(pollingInterval)
+      void supabase.removeChannel(channel)
+    }
+  }, [selectedConversation, user?.id])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
