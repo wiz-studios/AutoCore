@@ -48,8 +48,8 @@ function LoginPageContent() {
         throw signInError
       }
 
-      const redirectTarget = searchParams.get('redirect') || '/protected'
-      router.push(redirectTarget)
+      const redirectTarget = searchParams.get('redirect') || '/dashboard'
+      window.location.assign(redirectTarget)
     } catch (loginError: unknown) {
       setError(loginError instanceof Error ? loginError.message : 'An error occurred')
     } finally {

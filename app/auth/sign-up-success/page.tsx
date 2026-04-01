@@ -21,7 +21,7 @@ export default function Page() {
       setSecondsRemaining((current) => {
         if (current <= 1) {
           window.clearInterval(interval)
-          router.push('/auth/login')
+          router.push('/auth/login?redirect=/dashboard')
           return 0
         }
 
@@ -50,7 +50,7 @@ export default function Page() {
               </p>
               <div className="flex gap-3">
                 <Button asChild>
-                  <Link href="/auth/login">Login</Link>
+                  <Link href="/auth/login?redirect=/dashboard">Login</Link>
                 </Button>
                 <Button variant="outline" asChild>
                   <Link href="/browse">Browse Cars</Link>

@@ -63,7 +63,7 @@ export default function Page() {
         throw new Error(signUpPayload.error ?? 'Account creation failed.')
       }
 
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
@@ -72,7 +72,12 @@ export default function Page() {
         throw signInError
       }
 
-      router.push('/protected')
+      if (!signInData.session) {
+        window.location.assign('/auth/login?redirect=/dashboard')
+        return
+      }
+
+      window.location.assign('/dashboard')
     } catch (signupError: unknown) {
       setError(signupError instanceof Error ? signupError.message : 'An error occurred')
     } finally {
